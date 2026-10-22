@@ -2,5 +2,10 @@
   "schema": 1,
   "package_name": "PackageName",
   "title": "Astra PackageName",
-  "pages_url": "https://electricdrill.github.io/AstraPackageNameDocs/"
+  "pages_url": "https://electricdrill.github.io/AstraPackageNameDocs/",
+  "package_id": "com.electricdrill.astra-package-name",
+  "assembly": "ElectricDrill.Astra.PackageName.Runtime",
+  "namespace": "ElectricDrill.Astra.PackageName",
+  "source_repository": "Cis8/AstraPackageName",
+  "unity_project": "../AstraPublishing_6_3_8_2D"
 }

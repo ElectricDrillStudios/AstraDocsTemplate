@@ -1,11 +1,17 @@
 {
   "metadata": [
     {
-      "src": [],
+      "src": [
+        {
+          "src": "{{UNITY_PROJECT}}",
+          "files": ["{{ASSEMBLY}}.csproj"],
+          "exclude": ["Editor/**", "bin/**"]
+        }
+      ],
       "globalNamespaceId": "Global",
-      "filter": "filterConfig.yml",
+      "filter": "DocFx/filterConfig.yml",
       "dest": "api",
-      "allowCompilationErrors": false,
+      "allowCompilationErrors": true,
       "properties": {
         "ProduceReferenceAssembly": "true"
       }
@@ -13,13 +19,13 @@
   ],
   "build": {
     "content": [
-      { "files": ["**/*.{md,yml}"], "exclude": ["_site/**", "docs/**", ".astra-workspace/**", "README.md", "CLAUDE.md", "AGENTS.md", "context/**"] },
+      { "files": ["**/*.{md,yml}"], "exclude": ["docs/**", "DocFx/**", "tools/**", "tests/**", "README.md", "CLAUDE.md", "AGENTS.md", "context/**"] },
       { "files": ["api/toc.yml"] }
     ],
     "resource": [
       { "files": ["DocFx/images/**"] }
     ],
-    "output": "_site",
+    "output": "docs",
     "template": ["default", "modern", "DocFx/templates/astra"],
     "disableGitFeatures": true,
     "globalMetadata": {
@@ -31,6 +37,6 @@
       "_disableContribution": true,
       "_baseUrl": "{{PAGES_URL}}"
     },
-    "xref": []
+    "xref": ["https://normanderwan.github.io/UnityXrefMaps/xrefmap.yml"]
   }
 }

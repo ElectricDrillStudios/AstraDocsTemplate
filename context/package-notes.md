@@ -2,7 +2,7 @@
 
 This file holds package-specific context for AI agents and maintainers. Template synchronization preserves it. Fill in the sections as information becomes available; remove unused sections if appropriate. Do not store credentials or machine-specific private paths here.
 
-Use `astra-docs.json` and `release-lock.yml` as the sources of truth for identity, namespace, source repository, and revision. These notes supplement the shared instructions and style guide.
+Use `astra-docs.json` as the source of truth for identity, namespace, assembly, source repository, and local Unity project. These notes supplement the shared instructions and style guide.
 
 ## Source checkout hints
 
