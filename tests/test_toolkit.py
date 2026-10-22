@@ -19,8 +19,8 @@ from astra_docs import (  # noqa: E402
     assert_clean_resume_checkout,
     configure_new_repository,
     ensure_github_authentication,
-    grant_runner_group_access,
     parser,
+    replace_docs_folder,
     source_path_or_repository_root,
     wait_for_template_checkout,
 )
@@ -129,8 +129,6 @@ class ToolkitTests(unittest.TestCase):
             "--source-repo", "Cis8/AstraTags", "--resume",
         ])
         self.assertTrue(args.resume)
-        self.assertIsNone(args.unity_path)
-        self.assertEqual(args.runner_group, "packages-docs")
 
     def test_omitted_source_path_uses_the_package_repository_root(self) -> None:
         self.assertEqual(source_path_or_repository_root(None), ".")
@@ -150,14 +148,27 @@ class ToolkitTests(unittest.TestCase):
             unittest.mock.call("gh", "auth", "setup-git"),
         ])
 
-    def test_runner_group_access_adds_only_the_new_repository(self) -> None:
-        group = {"id": 3, "name": "packages-docs", "visibility": "selected"}
-        with patch("astra_docs.github_api_data", return_value={"id": 42}), patch("astra_docs.run") as command:
-            grant_runner_group_access("ElectricDrillStudios", group, "ElectricDrillStudios/AstraTagsDocs")
-        command.assert_called_once_with(
-            "gh", "api", "--method", "PUT",
-            "orgs/ElectricDrillStudios/actions/runner-groups/3/repositories/42",
-        )
+    def test_replace_docs_folder_swaps_the_site_and_keeps_pages_static(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            site, docs = Path(temporary) / "site", Path(temporary) / "docs"
+            site.mkdir()
+            (site / "index.html").write_text("new\n", encoding="utf-8")
+            docs.mkdir()
+            (docs / "stale.html").write_text("old\n", encoding="utf-8")
+            replace_docs_folder(site, docs)
+            self.assertEqual((docs / "index.html").read_text(encoding="utf-8"), "new\n")
+            self.assertFalse((docs / "stale.html").exists())
+            self.assertTrue((docs / ".nojekyll").is_file())
+
+    def test_replace_docs_folder_keeps_docs_when_the_build_is_incomplete(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            site, docs = Path(temporary) / "site", Path(temporary) / "docs"
+            site.mkdir()
+            docs.mkdir()
+            (docs / "index.html").write_text("old\n", encoding="utf-8")
+            with self.assertRaises(ValueError):
+                replace_docs_folder(site, docs)
+            self.assertEqual((docs / "index.html").read_text(encoding="utf-8"), "old\n")
 
 
 if __name__ == "__main__":

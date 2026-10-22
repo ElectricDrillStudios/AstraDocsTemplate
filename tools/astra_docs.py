@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Bootstrap, validate, publish, and update Astra Docs repositories."""
+"""Bootstrap, validate, build, and update Astra Docs repositories."""
 from __future__ import annotations
 
 import argparse
 import json
-import os
 import re
+import os
 import shutil
 import subprocess
 import sys
@@ -17,22 +17,19 @@ from lockfile import LockfileError, load_and_validate
 
 
 ROOT = Path(__file__).resolve().parents[1]
-TOKEN_NAME = "ASTRA_SOURCE_READ_TOKEN"
 DEFAULT_OWNER = "ElectricDrillStudios"
 DEFAULT_TEMPLATE = f"{DEFAULT_OWNER}/AstraDocsTemplate"
-DEFAULT_RUNNER_GROUP = "packages-docs"
+TOKEN_NAME = "ASTRA_SOURCE_READ_TOKEN"
+HOST_ROOT_NAME = "ASTRA_HOST_ROOT"
+PAGES_BRANCH = "main"
+PAGES_PATH = "/docs"
 TEMPLATE_BRANCH = "main"
 DEFAULT_SOURCE_PATH = "."
 
 
-def run(*args: str, cwd: Path | None = None, secret: bool = False) -> None:
-    print("+", "<redacted command>" if secret else " ".join(args))
-    try:
-        subprocess.run(args, cwd=cwd, check=True)
-    except subprocess.CalledProcessError as error:
-        if secret:
-            raise RuntimeError("secret configuration command failed") from error
-        raise
+def run(*args: str, cwd: Path | None = None) -> None:
+    print("+", " ".join(args))
+    subprocess.run(args, cwd=cwd, check=True)
 
 
 def wait_for_template_checkout(destination: Path, attempts: int = 30) -> None:
@@ -67,7 +64,7 @@ def repository_exists(repository: str) -> bool:
     ).returncode == 0
 
 
-def ensure_github_authentication(require_runner_admin: bool = False) -> None:
+def ensure_github_authentication() -> None:
     authenticated = subprocess.run(
         ["gh", "auth", "status", "--hostname", "github.com"],
         check=False,
@@ -76,50 +73,8 @@ def ensure_github_authentication(require_runner_admin: bool = False) -> None:
     ).returncode == 0
     if not authenticated:
         print("GitHub CLI is not authenticated; opening browser login...")
-        login = ["gh", "auth", "login", "--hostname", "github.com", "--web", "--git-protocol", "https"]
-        if require_runner_admin:
-            login.extend(["--scopes", "admin:org"])
-        run(*login)
-    if require_runner_admin:
-        run("gh", "auth", "refresh", "--hostname", "github.com", "--scopes", "admin:org")
+        run("gh", "auth", "login", "--hostname", "github.com", "--web", "--git-protocol", "https")
     run("gh", "auth", "setup-git")
-
-
-def github_api_data(endpoint: str) -> dict:
-    try:
-        return json.loads(subprocess.check_output(["gh", "api", endpoint], text=True))
-    except (subprocess.CalledProcessError, json.JSONDecodeError) as error:
-        raise RuntimeError(f"cannot read GitHub API endpoint {endpoint}") from error
-
-
-def runner_group(owner: str, name: str) -> dict:
-    endpoint = f"orgs/{owner}/actions/runner-groups?per_page=100"
-    try:
-        groups = github_api_data(endpoint).get("runner_groups", [])
-    except RuntimeError as error:
-        raise RuntimeError(
-            "cannot read organization runner groups; authorize GitHub CLI with the admin:org scope and use an organization owner account"
-        ) from error
-    for group in groups:
-        if group.get("name") == name:
-            return group
-    raise ValueError(f"runner group not found in {owner}: {name}")
-
-
-def grant_runner_group_access(owner: str, group: dict, repository: str) -> None:
-    visibility = group.get("visibility")
-    if visibility == "all":
-        print(f"runner group {group['name']} already grants every repository access")
-        return
-    if visibility != "selected":
-        raise ValueError(f"runner group {group['name']} has unsupported visibility: {visibility}")
-    repository_id = github_api_data(f"repos/{repository}").get("id")
-    if not isinstance(repository_id, int):
-        raise RuntimeError(f"GitHub did not return a repository ID for {repository}")
-    run(
-        "gh", "api", "--method", "PUT",
-        f"orgs/{owner}/actions/runner-groups/{group['id']}/repositories/{repository_id}",
-    )
 
 
 def assert_clean_resume_checkout(destination: Path, repository: str) -> None:
@@ -205,13 +160,10 @@ def configure_new_repository(root: Path, args: argparse.Namespace) -> None:
 
 
 def command_new(args: argparse.Namespace) -> None:
-    if not os.environ.get(TOKEN_NAME):
-        raise ValueError(f"set {TOKEN_NAME} to a fine-grained read-only contents token before bootstrapping")
     repo = repository_name(args.package_name)
     destination = Path(args.directory or repo).resolve()
     repository = f"{args.owner}/{repo}"
-    ensure_github_authentication(require_runner_admin=True)
-    target_runner_group = runner_group(args.owner, args.runner_group)
+    ensure_github_authentication()
     if args.resume:
         if not repository_exists(repository):
             raise ValueError(f"cannot resume because GitHub repository does not exist: {repository}")
@@ -228,15 +180,12 @@ def command_new(args: argparse.Namespace) -> None:
         run("git", "clone", f"https://github.com/{repository}.git", str(destination))
     wait_for_template_checkout(destination)
     configure_new_repository(destination, args)
-    run("gh", "secret", "set", TOKEN_NAME, "--repo", repository, "--body", os.environ[TOKEN_NAME], secret=True)
-    grant_runner_group_access(args.owner, target_runner_group, repository)
-    if args.unity_path:
-        run("gh", "variable", "set", "ASTRA_UNITY_PATH", "--repo", repository, "--body", args.unity_path)
-    # Create Pages configuration, or update it when this is a repeatable bootstrap.
+    # Serve the committed docs/ folder; create the Pages configuration, or update it when this is a repeatable bootstrap.
+    pages = ("-f", "build_type=legacy", "-f", f"source[branch]={PAGES_BRANCH}", "-f", f"source[path]={PAGES_PATH}")
     try:
-        run("gh", "api", "--method", "POST", f"repos/{repository}/pages", "-f", "build_type=workflow")
+        run("gh", "api", "--method", "POST", f"repos/{repository}/pages", *pages)
     except subprocess.CalledProcessError:
-        run("gh", "api", "--method", "PUT", f"repos/{repository}/pages", "-f", "build_type=workflow")
+        run("gh", "api", "--method", "PUT", f"repos/{repository}/pages", *pages)
     commit_configuration(destination)
     run("git", "push", "origin", "main", cwd=destination)
     print(f"Created https://{args.owner.lower()}.github.io/{repo}/")
@@ -249,14 +198,38 @@ def command_validate(args: argparse.Namespace) -> None:
     print(f"valid: {target['id']} ({target['assembly']}) at {target['source']['repository']}@{target['source']['ref']}")
 
 
-def command_publish(args: argparse.Namespace) -> None:
+def replace_docs_folder(site: Path, docs: Path) -> None:
+    """Swap the committed docs/ folder for a freshly built site."""
+    if not (site / "index.html").is_file():
+        raise ValueError(f"not a built site: {site}")
+    if docs.exists():
+        shutil.rmtree(docs)
+    shutil.copytree(site, docs)
+    # Stop GitHub Pages from running Jekyll over the generated site.
+    (docs / ".nojekyll").touch()
+
+
+def command_build(args: argparse.Namespace) -> None:
     root = Path(args.root).resolve()
     command_validate(argparse.Namespace(lock=root / "release-lock.yml"))
-    remote = subprocess.check_output(["git", "remote", "get-url", "origin"], cwd=root, text=True).strip()
-    match = re.search(r"(?:github.com[:/])([^/]+)/([^/.]+)(?:\.git)?$", remote)
-    if not match:
-        raise ValueError("origin must point at a GitHub repository")
-    run("gh", "workflow", "run", "publish-docs.yml", "--repo", f"{match.group(1)}/{match.group(2)}", "--ref", "main")
+    if not os.environ.get(TOKEN_NAME):
+        raise ValueError(f"set {TOKEN_NAME} to the fine-grained read-only contents token before building")
+    host_value = args.host_root or os.environ.get(HOST_ROOT_NAME)
+    if not host_value:
+        raise ValueError(f"pass --host-root or set {HOST_ROOT_NAME} to the AstraPublishingHost checkout")
+    host = Path(host_value).resolve()
+    build_script = host / "tools" / "build_docs.py"
+    if not build_script.is_file():
+        raise ValueError(f"not an AstraPublishingHost checkout: {host}")
+    with tempfile.TemporaryDirectory(prefix="astra-site-") as temporary:
+        site = Path(temporary) / "site"
+        command = [sys.executable, str(build_script), "--lock", str(root / "release-lock.yml"),
+                   "--docs-root", str(root), "--host-root", str(host), "--output", str(site)]
+        if args.unity_path:
+            command.extend(["--unity-path", args.unity_path])
+        run(*command)
+        replace_docs_folder(site, root / "docs")
+    print(f"docs/ rebuilt; review `git status`, then commit and push to publish")
 
 
 def template_root(args: argparse.Namespace) -> tuple[Path, tempfile.TemporaryDirectory[str] | None]:
@@ -322,17 +295,17 @@ def parser() -> argparse.ArgumentParser:
     create.add_argument("--title")
     create.add_argument("--owner", default=DEFAULT_OWNER, help="GitHub organization or user that will own the public docs repository")
     create.add_argument("--template", default=DEFAULT_TEMPLATE)
-    create.add_argument("--runner-group", default=DEFAULT_RUNNER_GROUP, help="organization runner group to authorize for the new repository")
-    create.add_argument("--unity-path", help="single-runner override: absolute Unity executable path")
     create.add_argument("--directory")
     create.add_argument("--resume", action="store_true", help="continue a failed bootstrap for the same clean checkout")
     create.set_defaults(handler=command_new)
     validate = commands.add_parser("validate", help="validate a release lock without credentials")
     validate.add_argument("--lock", default="release-lock.yml")
     validate.set_defaults(handler=command_validate)
-    publish = commands.add_parser("publish", help="validate then dispatch the publish workflow")
-    publish.add_argument("--root", default=".")
-    publish.set_defaults(handler=command_publish)
+    build = commands.add_parser("build", help="build the site with the private publishing host into docs/")
+    build.add_argument("--root", default=".")
+    build.add_argument("--host-root", help=f"AstraPublishingHost checkout (default: ${HOST_ROOT_NAME})")
+    build.add_argument("--unity-path", help="absolute Unity executable path (default: $UNITY_PATH or $UNITY_EXECUTABLE)")
+    build.set_defaults(handler=command_build)
     sync = commands.add_parser("sync", help="update only template-managed files")
     mode = sync.add_mutually_exclusive_group(required=True)
     mode.add_argument("--check", action="store_true")
