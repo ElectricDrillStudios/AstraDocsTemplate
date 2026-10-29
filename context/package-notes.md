@@ -16,6 +16,10 @@ Use `astra-docs.json` as the source of truth for identity, namespace, assembly, 
 
 <!-- Link to established pages in this repository that illustrate the shared style well. The initial template has no substantive reference pages. -->
 
+## Tone reference and running examples
+
+<!-- Name the page (in this repository or a sibling) whose voice new pages should follow, and what to copy from it. Name the concrete examples to reuse across introduction and concept pages. List the mechanisms that belong only in their dedicated guides, not on the introduction. -->
+
 ## Authoring context
 
 <!-- Record relevant package-specific workflows or known gaps that cannot be discovered from the shared configuration. -->
